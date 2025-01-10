@@ -201,7 +201,7 @@ function formatarDividaComTotal(divida) {
     divida.jurosMensais > 0 && !divida.dataFimJuros
       ? ` (${divida.jurosMensais}%)`
       : '';
-  return `${divida.descricao} (Total: ${formatarMoeda(
+  return `${divida.id} - ${divida.descricao} (Total: ${formatarMoeda(
     valorFinal
   )})${jurosInfo}`;
 }
