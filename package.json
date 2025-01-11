@@ -4,9 +4,14 @@
   "main": "index.js",
   "license": "MIT",
   "scripts": {
-    "dev": "node index.js"
+    "start": "node index.js",
+    "build:win": "node_modules/.bin/pkg . --targets latest-win-x64 --output Devedores.exe"
   },
   "dependencies": {
     "inquirer": "^12.3.0"
+  },
+  "bin": "index.js",
+  "devDependencies": {
+    "pkg": "^5.8.1"
   }
 }

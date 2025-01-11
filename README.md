@@ -32,5 +32,5 @@ Este é um projeto de gerenciamento de dívidas que permite adicionar, listar, a
 
 3. **Execute o projeto**:
    ```bash
-   yarn dev
+   yarn start
    ```
