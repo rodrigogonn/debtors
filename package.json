@@ -8,7 +8,8 @@
     "build:win": "node_modules/.bin/pkg . --targets latest-win-x64 --output Devedores.exe"
   },
   "dependencies": {
-    "inquirer": "^12.3.0"
+    "inquirer": "^12.3.0",
+    "luxon": "^3.5.0"
   },
   "bin": "index.js",
   "devDependencies": {

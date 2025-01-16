@@ -1,6 +1,7 @@
 const fs = require('fs');
 const inquirer = require('inquirer');
 const prompt = inquirer.createPromptModule();
+const { DateTime } = require('luxon');
 
 // Códigos de cores ANSI
 const cores = {
@@ -50,13 +51,17 @@ function validarData(data) {
   if (!regex.test(data)) return false;
 
   const [dia, mes, ano] = data.split('/');
-  const dataObj = new Date(ano, mes - 1, dia);
+  const dataObj = DateTime.fromObject({
+    day: parseInt(dia),
+    month: parseInt(mes),
+    year: parseInt(ano),
+  });
+
   return (
-    dataObj instanceof Date &&
-    !isNaN(dataObj) &&
-    dataObj.getDate() === parseInt(dia) &&
-    dataObj.getMonth() === parseInt(mes) - 1 &&
-    dataObj.getFullYear() === parseInt(ano)
+    dataObj.isValid &&
+    dataObj.day === parseInt(dia) &&
+    dataObj.month === parseInt(mes) &&
+    dataObj.year === parseInt(ano)
   );
 }
 
@@ -73,7 +78,6 @@ function atualizarHistorico(divida) {
 
   // Pega a data inicial e o dia dos juros
   const dataInicial = new Date(divida.dataCriacao);
-  const diaJuros = dataInicial.getDate();
   let dataJuros = new Date(dataInicial);
 
   // Adiciona a lógica para parar de cobrar juros após `dataFimJuros`
@@ -81,10 +85,9 @@ function atualizarHistorico(divida) {
     ? new Date(divida.dataFimJuros)
     : null;
 
+  let mesesAdicionados = 0;
   // Processa o histórico em ordem cronológica
   historicoOrdenado.forEach((evento) => {
-    const dataEvento = new Date(evento.data);
-
     // Adiciona o evento
     historicoAtualizado.push({
       data: evento.data,
@@ -106,8 +109,10 @@ function atualizarHistorico(divida) {
         });
         valorAtual += jurosInicial;
       }
-      // Avança para o próximo mês mantendo o mesmo dia
-      dataJuros.setMonth(dataJuros.getMonth() + 1);
+      // Avança para o próximo mês, calculando a partir da data inicial
+      dataJuros = DateTime.fromJSDate(dataInicial)
+        .plus({ months: ++mesesAdicionados })
+        .toJSDate();
     }
   });
 
@@ -134,7 +139,9 @@ function atualizarHistorico(divida) {
       });
       valorAtual += juros;
     }
-    dataJuros.setMonth(dataJuros.getMonth() + 1);
+    dataJuros = DateTime.fromJSDate(dataInicial)
+      .plus({ months: ++mesesAdicionados })
+      .toJSDate();
   }
 
   // Ordena o histórico final por data
@@ -936,46 +943,37 @@ function formatarMoeda(valor) {
 function calcularStatusParcela(divida) {
   if (!divida.parcelamento) return null;
 
-  const hoje = new Date();
-  const inicioVencimentos = new Date(divida.parcelamento.inicioVencimentos);
+  const hoje = DateTime.now();
+  const inicioVencimentos = DateTime.fromISO(
+    divida.parcelamento.inicioVencimentos
+  );
 
-  // Ajuste para considerar o dia do vencimento
-  const diaVencimento = divida.parcelamento.diaVencimento;
-
-  // Calcula quantas parcelas já venceram desde o início
   let parcelaAtual = 1;
-  let dataVencimento = new Date(inicioVencimentos);
+  let dataVencimento = inicioVencimentos;
 
-  while (dataVencimento < hoje) {
-    parcelaAtual++;
-    dataVencimento = new Date(dataVencimento);
-    dataVencimento.setMonth(dataVencimento.getMonth() + 1);
-  }
-
-  // Volta uma parcela para verificar se a anterior está paga
-  parcelaAtual--;
-  dataVencimento.setMonth(dataVencimento.getMonth() - 1);
-
-  // Ajusta para não ultrapassar o total de parcelas
-  parcelaAtual = Math.min(parcelaAtual, divida.parcelamento.totalParcelas);
-
-  // Calcula total pago
+  // Calcula o total pago
   const totalPago = divida.historico
     .filter((h) => h.valor < 0)
     .reduce((sum, h) => sum + Math.abs(h.valor), 0);
 
   const valorParcela = divida.parcelamento.valorParcela;
 
-  // Calcula pagamentos da nova parcela
-  const valorParcelasAtePenultima = (parcelaAtual - 1) * valorParcela;
-  const pagamentosNovaParcela = Math.max(
-    0,
-    totalPago - valorParcelasAtePenultima
-  );
+  // Calcula quantas parcelas já deveriam ter sido pagas
+  while (dataVencimento <= hoje) {
+    if (totalPago < parcelaAtual * valorParcela) {
+      break;
+    }
+    parcelaAtual++;
+    dataVencimento = dataVencimento.plus({ months: 1 });
+  }
+
+  // Ajusta para não ultrapassar o total de parcelas
+  parcelaAtual = Math.min(parcelaAtual, divida.parcelamento.totalParcelas);
 
   // Determina o status baseado no vencimento e pagamento
   let status;
-  if (pagamentosNovaParcela < valorParcela && dataVencimento <= hoje) {
+  const valorRestanteParcela = parcelaAtual * valorParcela - totalPago;
+  if (valorRestanteParcela > 0 && dataVencimento <= hoje) {
     status = 'ATRASADA';
   } else if (dataVencimento > hoje) {
     status = 'EM_ABERTO';
@@ -984,12 +982,12 @@ function calcularStatusParcela(divida) {
   }
 
   return {
-    parcelaAtual: parcelaAtual,
+    parcelaAtual,
     totalParcelas: divida.parcelamento.totalParcelas,
-    valorParcela: valorParcela,
+    valorParcela,
     valorPago: totalPago,
-    pagamentosParcela: pagamentosNovaParcela,
-    vencimento: dataVencimento.toISOString().split('T')[0],
+    pagamentosParcela: totalPago - (parcelaAtual - 1) * valorParcela,
+    vencimento: dataVencimento.toISODate(),
     status,
   };
 }
@@ -1045,23 +1043,19 @@ function exibirDetalheDivida(divida) {
   console.log(`\nValor total da dívida: ${formatarMoeda(valorFinal)}`);
 
   // Calcular próxima data de cobrança de juros e valor
+  // @TODO ajustar trechos que usam getMonth para usar luxon
   if (divida.jurosMensais > 0) {
     const hoje = new Date();
     const dataCriacao = new Date(divida.dataCriacao);
-    let proximaDataJuros = new Date(
-      hoje.getFullYear(),
-      hoje.getMonth(),
-      dataCriacao.getDate()
-    );
+    let proximaDataJuros = DateTime.fromJSDate(hoje)
+      .set({ day: DateTime.fromJSDate(dataCriacao).day })
+      .toJSDate();
 
     // Se a próxima data de juros calculada já passou, ajusta para o próximo mês
     if (proximaDataJuros <= hoje) {
-      proximaDataJuros.setMonth(proximaDataJuros.getMonth() + 1);
-    }
-
-    // Ajusta o dia se o mês seguinte não tiver o mesmo dia
-    if (proximaDataJuros.getDate() !== dataCriacao.getDate()) {
-      proximaDataJuros.setDate(0); // Define para o último dia do mês anterior
+      proximaDataJuros = DateTime.fromJSDate(proximaDataJuros)
+        .plus({ months: 1 })
+        .toJSDate();
     }
 
     if (
