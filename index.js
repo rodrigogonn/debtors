@@ -1043,19 +1043,14 @@ function exibirDetalheDivida(divida) {
   console.log(`\nValor total da dívida: ${formatarMoeda(valorFinal)}`);
 
   // Calcular próxima data de cobrança de juros e valor
-  // @TODO ajustar trechos que usam getMonth para usar luxon
   if (divida.jurosMensais > 0) {
-    const hoje = new Date();
-    const dataCriacao = new Date(divida.dataCriacao);
-    let proximaDataJuros = DateTime.fromJSDate(hoje)
-      .set({ day: DateTime.fromJSDate(dataCriacao).day })
-      .toJSDate();
+    const hoje = DateTime.now();
+    const dataCriacao = DateTime.fromISO(divida.dataCriacao);
+    let proximaDataJuros = hoje.set({ day: dataCriacao.day });
 
     // Se a próxima data de juros calculada já passou, ajusta para o próximo mês
     if (proximaDataJuros <= hoje) {
-      proximaDataJuros = DateTime.fromJSDate(proximaDataJuros)
-        .plus({ months: 1 })
-        .toJSDate();
+      proximaDataJuros = proximaDataJuros.plus({ months: 1 });
     }
 
     if (
@@ -1070,7 +1065,7 @@ function exibirDetalheDivida(divida) {
 
       console.log(
         `\nPróximo juros: ${formatarMoeda(valorJuros)} em ${formatarData(
-          proximaDataJuros.toISOString().split('T')[0]
+          proximaDataJuros.toJSDate()
         )}`
       );
     } else {
