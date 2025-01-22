@@ -293,6 +293,10 @@ async function listarDevedores(dados) {
     (d) => d.nome === nomeDevedor
   );
 
+  await exibirDividasDevedor(devedorSelecionado, dados);
+}
+
+async function exibirDividasDevedor(devedorSelecionado, dados) {
   const { divida } = await prompt([
     {
       type: 'list',
@@ -322,7 +326,7 @@ async function listarDevedores(dados) {
 
   console.log('\nPressione Enter para continuar...');
   await prompt([{ type: 'input', name: 'continue', message: '' }]);
-  await menuPrincipal();
+  await exibirDividasDevedor(devedorSelecionado, dados);
 }
 
 // Função auxiliar para validar valores monetários
@@ -1074,7 +1078,7 @@ function exibirDetalheDivida(divida) {
         )}`
       );
     } else {
-      console.log('Não há mais cobrança de juros.');
+      console.log('\nNão há mais cobrança de juros.');
     }
   }
 }
