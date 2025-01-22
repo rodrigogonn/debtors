@@ -572,7 +572,7 @@ async function registrarPagamento(dados) {
     `\nValor máximo que pode ser pago: ${formatarMoeda(valorMaximo)}`
   );
 
-  const { valor, data } = await prompt([
+  const { valor, descricao, data } = await prompt([
     {
       ...validarValorMonetario,
       name: 'valor',
@@ -586,6 +586,11 @@ async function registrarPagamento(dados) {
         return true;
       },
     },
+    {
+      type: 'input',
+      name: 'descricao',
+      message: 'Descrição do pagamento:',
+    },
     { type: 'input', name: 'data', message: 'Data do pagamento (DD/MM/YYYY):' },
   ]);
 
@@ -596,7 +601,7 @@ async function registrarPagamento(dados) {
 
   dividaSelecionada.historico.push({
     data: converterDataParaISO(data),
-    descricao: 'Pagamento recebido',
+    descricao: descricao || 'Pagamento recebido',
     valor: -valor,
   });
 
