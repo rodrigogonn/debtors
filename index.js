@@ -76,18 +76,40 @@ function atualizarHistorico(divida) {
     (a, b) => new Date(a.data) - new Date(b.data)
   );
 
+  // Inicializa o histórico de juros se não existir
+  if (!divida.historicoJuros) {
+    divida.historicoJuros = [
+      {
+        data: divida.dataCriacao,
+        valor: divida.jurosMensais || 0,
+      },
+    ];
+  }
+
+  // Ordena o histórico de juros por data
+  const historicoJurosOrdenado = [...divida.historicoJuros].sort(
+    (a, b) => new Date(a.data) - new Date(b.data)
+  );
+
   // Pega a data inicial e o dia dos juros
   const dataInicial = new Date(divida.dataCriacao);
   let dataJuros = new Date(dataInicial);
 
-  // Adiciona a lógica para parar de cobrar juros após `dataFimJuros`
-  const dataFimJuros = divida.dataFimJuros
-    ? new Date(divida.dataFimJuros)
-    : null;
-
   let mesesAdicionados = 0;
+  let jurosAtual = historicoJurosOrdenado[0].valor;
+  let proximoJuros = historicoJurosOrdenado[1];
+
   // Processa o histórico em ordem cronológica
   historicoOrdenado.forEach((evento) => {
+    // Verifica se precisa mudar o juros antes de adicionar o evento
+    if (proximoJuros && new Date(evento.data) >= new Date(proximoJuros.data)) {
+      jurosAtual = proximoJuros.valor;
+      proximoJuros =
+        historicoJurosOrdenado[
+          historicoJurosOrdenado.indexOf(proximoJuros) + 1
+        ];
+    }
+
     // Adiciona o evento
     historicoAtualizado.push({
       data: evento.data,
@@ -97,14 +119,12 @@ function atualizarHistorico(divida) {
     valorAtual += evento.valor;
 
     // Se for o primeiro evento e tiver juros, cobra imediatamente
-    if (evento === historicoOrdenado[0] && divida.jurosMensais > 0) {
-      const jurosInicial = valorAtual * (divida.jurosMensais / 100);
+    if (evento === historicoOrdenado[0] && jurosAtual > 0) {
+      const jurosInicial = valorAtual * (jurosAtual / 100);
       if (jurosInicial > 0) {
         historicoAtualizado.push({
           data: evento.data,
-          descricao: `Juros (${divida.jurosMensais}% de ${formatarMoeda(
-            valorAtual
-          )})`,
+          descricao: `Juros (${jurosAtual}% de ${formatarMoeda(valorAtual)})`,
           valor: jurosInicial,
         });
         valorAtual += jurosInicial;
@@ -117,24 +137,31 @@ function atualizarHistorico(divida) {
   });
 
   // Se não tem juros mensais, retorna o histórico
-  if (!divida.jurosMensais || divida.jurosMensais === 0) {
+  if (!jurosAtual || jurosAtual === 0) {
     return historicoAtualizado;
   }
 
-  // Adiciona juros mensais até hoje ou até `dataFimJuros`
-  while (dataJuros <= hoje && (!dataFimJuros || dataJuros <= dataFimJuros)) {
+  // Adiciona juros mensais até hoje
+  while (dataJuros <= hoje) {
+    // Verifica se precisa mudar o juros
+    if (proximoJuros && dataJuros >= new Date(proximoJuros.data)) {
+      jurosAtual = proximoJuros.valor;
+      proximoJuros =
+        historicoJurosOrdenado[
+          historicoJurosOrdenado.indexOf(proximoJuros) + 1
+        ];
+    }
+
     // Calcula o valor atual até a data dos juros
     const valorParaJuros = historicoAtualizado
       .filter((evento) => new Date(evento.data) <= dataJuros)
       .reduce((sum, evento) => sum + evento.valor, 0);
 
-    const juros = valorParaJuros * (divida.jurosMensais / 100);
+    const juros = valorParaJuros * (jurosAtual / 100);
     if (juros > 0) {
       historicoAtualizado.push({
         data: dataJuros.toISOString().split('T')[0],
-        descricao: `Juros (${divida.jurosMensais}% de ${formatarMoeda(
-          valorParaJuros
-        )})`,
+        descricao: `Juros (${jurosAtual}% de ${formatarMoeda(valorParaJuros)})`,
         valor: juros,
       });
       valorAtual += juros;
@@ -204,10 +231,20 @@ function calcularTotalGeral(dados) {
 // Função auxiliar para formatar a exibição de uma dívida com o valor total
 function formatarDividaComTotal(divida) {
   const { valorFinal } = calcularDividaAtualizada(divida);
-  const jurosInfo =
-    divida.jurosMensais > 0 && !divida.dataFimJuros
-      ? ` (${divida.jurosMensais}%)`
-      : '';
+
+  // Inicializa o histórico de juros se não existir
+  if (!divida.historicoJuros) {
+    divida.historicoJuros = [
+      {
+        data: divida.dataCriacao,
+        valor: divida.jurosMensais || 0,
+      },
+    ];
+  }
+
+  const jurosAtual =
+    divida.historicoJuros[divida.historicoJuros.length - 1].valor;
+  const jurosInfo = jurosAtual > 0 ? ` (${jurosAtual}%)` : '';
   return `${divida.id} - ${divida.descricao} (Total: ${formatarMoeda(
     valorFinal
   )})${jurosInfo}`;
@@ -484,6 +521,12 @@ async function adicionarDivida(dados) {
           ]
         : [],
     ...(parcelamento && { parcelamento }),
+    historicoJuros: [
+      {
+        data: dataCriacao,
+        valor: jurosMensais,
+      },
+    ],
   };
 
   devedor.dividas.push(novaDivida);
@@ -675,7 +718,7 @@ async function alterarDivida(dados) {
   const opcoes = [
     'Voltar',
     'Descrição',
-    'Juros mensais',
+    'Gerenciar juros',
     'Gerenciar histórico',
   ];
 
@@ -700,6 +743,10 @@ async function alterarDivida(dados) {
 
   if (campo === 'Voltar') {
     return await menuPrincipal();
+  }
+
+  if (campo === 'Gerenciar juros') {
+    return await gerenciarJuros(dados, dividaSelecionada);
   }
 
   if (campo === 'Gerenciar histórico') {
@@ -1012,8 +1059,21 @@ function exibirDetalheDivida(divida) {
   if (divida.observacao) {
     console.log(`Observação: ${divida.observacao}`);
   }
-  if (divida.jurosMensais > 0) {
-    console.log(`Juros mensais: ${divida.jurosMensais}%`);
+
+  // Inicializa o histórico de juros se não existir
+  if (!divida.historicoJuros) {
+    divida.historicoJuros = [
+      {
+        data: divida.dataCriacao,
+        valor: divida.jurosMensais || 0,
+      },
+    ];
+  }
+
+  const jurosAtual =
+    divida.historicoJuros[divida.historicoJuros.length - 1].valor;
+  if (jurosAtual > 0) {
+    console.log(`Juros mensais: ${jurosAtual}%`);
   }
 
   if (divida.parcelamento) {
@@ -1052,7 +1112,7 @@ function exibirDetalheDivida(divida) {
   console.log(`\nValor total da dívida: ${formatarMoeda(valorFinal)}`);
 
   // Calcular próxima data de cobrança de juros e valor
-  if (divida.jurosMensais > 0) {
+  if (jurosAtual > 0) {
     const hoje = DateTime.now();
     const dataCriacao = DateTime.fromISO(divida.dataCriacao);
     let proximaDataJuros = hoje.set({ day: dataCriacao.day });
@@ -1062,24 +1122,17 @@ function exibirDetalheDivida(divida) {
       proximaDataJuros = proximaDataJuros.plus({ months: 1 });
     }
 
-    if (
-      !divida.dataFimJuros ||
-      proximaDataJuros <= new Date(divida.dataFimJuros)
-    ) {
-      const valorAtual = historicoCompleto.reduce(
-        (sum, evento) => sum + evento.valor,
-        0
-      );
-      const valorJuros = valorAtual * (divida.jurosMensais / 100);
+    const valorAtual = historicoCompleto.reduce(
+      (sum, evento) => sum + evento.valor,
+      0
+    );
+    const valorJuros = valorAtual * (jurosAtual / 100);
 
-      console.log(
-        `\nPróximo juros: ${formatarMoeda(valorJuros)} em ${formatarData(
-          proximaDataJuros.toJSDate()
-        )}`
-      );
-    } else {
-      console.log('\nNão há mais cobrança de juros.');
-    }
+    console.log(
+      `\nPróximo juros: ${formatarMoeda(valorJuros)} em ${formatarData(
+        proximaDataJuros.toJSDate()
+      )}`
+    );
   }
 }
 
@@ -1095,6 +1148,125 @@ function exibirHistorico(historico) {
       }`
     );
   });
+}
+
+// Função para gerenciar juros
+async function gerenciarJuros(dados, divida) {
+  // Inicializa o histórico de juros se não existir
+  if (!divida.historicoJuros) {
+    divida.historicoJuros = [
+      {
+        data: divida.dataCriacao,
+        valor: divida.jurosMensais || 0,
+      },
+    ];
+  }
+
+  while (true) {
+    console.log('\nHistórico de juros:');
+    const opcoesJuros = divida.historicoJuros.map((juros, index) => {
+      const data = index === 0 ? 'Data de criação' : formatarData(juros.data);
+      return `${data}: ${juros.valor}%`;
+    });
+
+    const { acao } = await prompt([
+      {
+        type: 'list',
+        name: 'acao',
+        message: 'Selecione um juros ou adicione um novo:',
+        choices: ['Voltar', 'Adicionar novo juros', ...opcoesJuros],
+      },
+    ]);
+
+    if (acao === 'Voltar') {
+      return await alterarDivida(dados);
+    }
+
+    if (acao === 'Adicionar novo juros') {
+      const { valor, data } = await prompt([
+        {
+          ...validarValorMonetario,
+          name: 'valor',
+          message: 'Novo valor dos juros (%):',
+        },
+        {
+          type: 'input',
+          name: 'data',
+          message: 'Data de início (DD/MM/YYYY):',
+        },
+      ]);
+
+      if (!validarData(data)) {
+        console.log('Data inválida! Use o formato DD/MM/YYYY');
+        continue;
+      }
+
+      divida.historicoJuros.push({
+        data: converterDataParaISO(data),
+        valor: Number(valor),
+      });
+
+      // Ordena o histórico de juros por data
+      divida.historicoJuros.sort((a, b) => new Date(a.data) - new Date(b.data));
+      console.log('Juros adicionados com sucesso!');
+      salvarDados(dados);
+      continue;
+    }
+
+    // Se chegou aqui, selecionou um juros existente
+    const index = opcoesJuros.indexOf(acao);
+    const juros = divida.historicoJuros[index];
+
+    const { subAcao } = await prompt([
+      {
+        type: 'list',
+        name: 'subAcao',
+        message: 'O que deseja fazer com este juros?',
+        choices: ['Voltar', 'Alterar', ...(index > 0 ? ['Remover'] : [])],
+      },
+    ]);
+
+    if (subAcao === 'Voltar') {
+      continue;
+    }
+
+    if (subAcao === 'Alterar') {
+      const prompts = [
+        {
+          ...validarValorMonetario,
+          name: 'valor',
+          message: 'Novo valor dos juros (%):',
+          default: juros.valor.toString(),
+        },
+      ];
+
+      // Só adiciona o prompt de data se não for o juros da criação
+      if (index > 0) {
+        prompts.push({
+          type: 'input',
+          name: 'data',
+          message: 'Nova data de início (DD/MM/YYYY):',
+          default: formatarData(juros.data),
+        });
+      }
+
+      const respostas = await prompt(prompts);
+
+      juros.valor = Number(respostas.valor);
+      if (index > 0 && validarData(respostas.data)) {
+        juros.data = converterDataParaISO(respostas.data);
+      }
+
+      // Ordena o histórico de juros por data
+      divida.historicoJuros.sort((a, b) => new Date(a.data) - new Date(b.data));
+      console.log('Juros alterados com sucesso!');
+    } else if (subAcao === 'Remover') {
+      divida.historicoJuros.splice(index, 1);
+      console.log('Juros removidos com sucesso!');
+    }
+
+    salvarDados(dados);
+  }
 }
 
 // Executa o programa
