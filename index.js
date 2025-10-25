@@ -136,12 +136,7 @@ function atualizarHistorico(divida) {
     }
   });
 
-  // Se não tem juros mensais, retorna o histórico
-  if (!jurosAtual || jurosAtual === 0) {
-    return historicoAtualizado;
-  }
-
-  // Adiciona juros mensais até hoje
+  // Adiciona juros mensais até hoje, mesmo que o valor inicial seja 0
   while (dataJuros <= hoje) {
     // Verifica se precisa mudar o juros
     if (proximoJuros && dataJuros >= new Date(proximoJuros.data)) {
@@ -619,6 +614,7 @@ async function registrarPagamento(dados) {
     `\nValor máximo que pode ser pago: ${formatarMoeda(valorMaximo)}`
   );
 
+  const hojeDefault = DateTime.now().toFormat('dd/LL/yyyy');
   const { valor, descricao, data } = await prompt([
     {
       ...validarValorMonetario,
@@ -638,7 +634,12 @@ async function registrarPagamento(dados) {
       name: 'descricao',
       message: 'Descrição do pagamento:',
     },
-    { type: 'input', name: 'data', message: 'Data do pagamento (DD/MM/YYYY):' },
+    {
+      type: 'input',
+      name: 'data',
+      message: `Data do pagamento (${hojeDefault}):`,
+      default: hojeDefault,
+    },
   ]);
 
   if (!validarData(data)) {
