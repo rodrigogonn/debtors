@@ -633,11 +633,12 @@ async function registrarPagamento(dados) {
       type: 'input',
       name: 'descricao',
       message: 'Descrição do pagamento:',
+      default: 'Pagamento recebido',
     },
     {
       type: 'input',
       name: 'data',
-      message: `Data do pagamento (${hojeDefault}):`,
+      message: `Data do pagamento:`,
       default: hojeDefault,
     },
   ]);
@@ -649,7 +650,7 @@ async function registrarPagamento(dados) {
 
   dividaSelecionada.historico.push({
     data: converterDataParaISO(data),
-    descricao: descricao || 'Pagamento recebido',
+    descricao,
     valor: -valor,
   });
 
