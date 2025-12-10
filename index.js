@@ -962,7 +962,8 @@ function calcularDividaAtualizada(divida) {
       .reduce((sum, h) => sum + Math.abs(h.valor), 0);
 
     const valorFinal = valorTotal - valorPago;
-    divida.quitada = Math.abs(valorFinal) < 0.01;
+    // Marca como quitada se o valor for negativo (pagamento a mais) ou muito próximo de zero (arredondamento)
+    divida.quitada = valorFinal < 0.01;
 
     return {
       historicoCompleto: divida.historico,
@@ -977,7 +978,8 @@ function calcularDividaAtualizada(divida) {
     0
   );
 
-  divida.quitada = Math.abs(valorFinal) < 0.01;
+  // Marca como quitada se o valor for negativo (pagamento a mais) ou muito próximo de zero (arredondamento)
+  divida.quitada = valorFinal < 0.01;
 
   return {
     historicoCompleto,
