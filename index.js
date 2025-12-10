@@ -117,26 +117,13 @@ function atualizarHistorico(divida) {
       valor: evento.valor,
     });
     valorAtual += evento.valor;
-
-    // Se for o primeiro evento e tiver juros, cobra imediatamente
-    if (evento === historicoOrdenado[0] && jurosAtual > 0) {
-      const jurosInicial = valorAtual * (jurosAtual / 100);
-      if (jurosInicial > 0) {
-        historicoAtualizado.push({
-          data: evento.data,
-          descricao: `Juros (${jurosAtual}% de ${formatarMoeda(valorAtual)})`,
-          valor: jurosInicial,
-        });
-        valorAtual += jurosInicial;
-      }
-      // Avança para o próximo mês, calculando a partir da data inicial
-      dataJuros = DateTime.fromJSDate(dataInicial)
-        .plus({ months: ++mesesAdicionados })
-        .toJSDate();
-    }
   });
 
-  // Adiciona juros mensais até hoje, mesmo que o valor inicial seja 0
+  // Inicializa dataJuros para 1 mês depois da data inicial (primeiro juros)
+  dataJuros = DateTime.fromJSDate(dataInicial).plus({ months: 1 }).toJSDate();
+  mesesAdicionados = 1;
+
+  // Adiciona juros mensais completos até o último mês completo
   while (dataJuros <= hoje) {
     // Verifica se precisa mudar o juros
     if (proximoJuros && dataJuros >= new Date(proximoJuros.data)) {
@@ -147,23 +134,83 @@ function atualizarHistorico(divida) {
         ];
     }
 
+    // Calcula a próxima data de juros
+    const proximaDataJuros = DateTime.fromJSDate(dataInicial)
+      .plus({ months: mesesAdicionados + 1 })
+      .toJSDate();
+
     // Calcula o valor atual até a data dos juros
     const valorParaJuros = historicoAtualizado
       .filter((evento) => new Date(evento.data) <= dataJuros)
       .reduce((sum, evento) => sum + evento.valor, 0);
 
+    // Juros mensal completo
     const juros = valorParaJuros * (jurosAtual / 100);
     if (juros > 0) {
       historicoAtualizado.push({
         data: dataJuros.toISOString().split('T')[0],
-        descricao: `Juros (${jurosAtual}% de ${formatarMoeda(valorParaJuros)})`,
+        descricao: `Juros (${jurosAtual}% de ${formatarMoedaSemCores(
+          valorParaJuros
+        )})`,
         valor: juros,
       });
       valorAtual += juros;
     }
+
+    // Se a próxima data de juros já passou de hoje, para aqui
+    // (vamos processar o período parcial depois)
+    if (proximaDataJuros > hoje) {
+      break;
+    }
+
+    // Avança para o próximo mês
     dataJuros = DateTime.fromJSDate(dataInicial)
       .plus({ months: ++mesesAdicionados })
       .toJSDate();
+  }
+
+  // Se ainda há um período parcial até hoje, adiciona juros proporcional
+  if (dataJuros <= hoje) {
+    // Verifica se precisa mudar o juros para o período parcial
+    if (proximoJuros && dataJuros >= new Date(proximoJuros.data)) {
+      jurosAtual = proximoJuros.valor;
+    }
+
+    // Calcula juros proporcional aos dias do período parcial
+    // O período parcial começa no dia seguinte ao último juros completo
+    // Normaliza as datas para o início do dia (meia-noite) para calcular apenas dias inteiros
+    const dataJurosDateTime = DateTime.fromJSDate(dataJuros)
+      .startOf('day')
+      .plus({ days: 1 });
+    const hojeDateTime = DateTime.fromJSDate(hoje).startOf('day');
+    const diasDecorridos = Math.floor(
+      hojeDateTime.diff(dataJurosDateTime, 'days').days
+    );
+
+    if (diasDecorridos > 0) {
+      // Calcula quantos dias tem o mês de referência (mês do dataJuros)
+      const diasNoMes = dataJurosDateTime.daysInMonth;
+
+      // Calcula o valor atual até hoje
+      const valorParaJuros = historicoAtualizado
+        .filter((evento) => new Date(evento.data) <= hoje)
+        .reduce((sum, evento) => sum + evento.valor, 0);
+
+      // Calcula o juros proporcional
+      const proporcao = diasDecorridos / diasNoMes;
+      const juros = valorParaJuros * (jurosAtual / 100) * proporcao;
+
+      if (juros > 0) {
+        historicoAtualizado.push({
+          data: hoje.toISOString().split('T')[0],
+          descricao: `Juros parcial do mês atual (${jurosAtual}% de ${formatarMoedaSemCores(
+            valorParaJuros
+          )} - ${diasDecorridos} dias)`,
+          valor: juros,
+        });
+        valorAtual += juros;
+      }
+    }
   }
 
   // Ordena o histórico final por data
@@ -995,6 +1042,11 @@ function formatarNumero(numero) {
     .replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 }
 
+// Função para formatar moeda sem cores (para uso em descrições)
+function formatarMoedaSemCores(valor) {
+  return `R$ ${formatarNumero(valor)}`;
+}
+
 // Manter a função original para casos onde não queremos cor/alinhamento
 function formatarMoeda(valor) {
   return `${cores.amarelo}R$ ${formatarNumero(valor)}${cores.reset}`;
@@ -1144,13 +1196,28 @@ function exibirHistorico(historico) {
   console.log('\nHistórico:');
   historico.forEach((evento) => {
     const valor = evento.valor < 0 ? cores.verde : cores.vermelho;
-    console.log(
-      `${valor}${evento.valor < 0 ? '-' : '+'}R$ ${formatarNumero(
-        Math.abs(evento.valor)
-      ).padStart(11)} - ${evento.descricao} (${formatarData(evento.data)})${
-        cores.reset
-      }`
+    const isJurosParcial = evento.descricao.startsWith(
+      'Juros parcial do mês atual'
     );
+
+    if (isJurosParcial) {
+      // Juros parcial: sem data e com espaçamento
+      console.log('');
+      console.log(
+        `${valor}${evento.valor < 0 ? '-' : '+'}R$ ${formatarNumero(
+          Math.abs(evento.valor)
+        ).padStart(11)} - ${evento.descricao}${cores.reset}`
+      );
+    } else {
+      // Evento normal: com data
+      console.log(
+        `${valor}${evento.valor < 0 ? '-' : '+'}R$ ${formatarNumero(
+          Math.abs(evento.valor)
+        ).padStart(11)} - ${evento.descricao} (${formatarData(evento.data)})${
+          cores.reset
+        }`
+      );
+    }
   });
 }
 
