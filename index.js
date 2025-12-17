@@ -671,7 +671,10 @@ async function registrarPagamento(dados) {
         const valor = parseFloat(input.replace(',', '.'));
         if (isNaN(valor)) return 'Por favor, digite um número válido';
         if (valor <= 0) return 'O valor deve ser maior que zero';
-        if (valor > valorMaximo)
+        // Arredonda ambos os valores para 2 casas decimais para evitar problemas de precisão
+        const valorArredondado = Math.round(valor * 100) / 100;
+        const valorMaximoArredondado = Math.round(valorMaximo * 100) / 100;
+        if (valorArredondado > valorMaximoArredondado)
           return `O valor não pode ser maior que ${formatarMoeda(valorMaximo)}`;
         return true;
       },
