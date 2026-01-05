@@ -746,7 +746,7 @@ async function alterarDivida(dados) {
   );
 
   const escolhasDividas = ordenarDividasPorValor(
-    devedorSelecionado.dividas
+    devedorSelecionado.dividas.filter((d) => !d.quitada)
   ).map(formatarDividaComTotal);
 
   const { dividaEscolha } = await prompt([
