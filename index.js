@@ -169,37 +169,55 @@ function atualizarHistorico(divida) {
       .toJSDate();
   }
 
-  // Se ainda há um período parcial até hoje, adiciona juros proporcional
-  if (dataJuros <= hoje) {
-    // Verifica se precisa mudar o juros para o período parcial
+  // Período parcial: juros proporcional aos dias
+  // Caso 1: ainda no primeiro mês (não chegou na data do primeiro juros completo) → parcial desde a criação
+  // Caso 2: já passou pelo menos um mês completo → parcial do dia seguinte ao último juros até hoje
+  const hojeDateTime = DateTime.fromJSDate(hoje).startOf('day');
+  const dataInicialDateTime = DateTime.fromJSDate(dataInicial).startOf('day');
+
+  if (dataJuros > hoje) {
+    // Ainda no primeiro mês: parcial desde a criação até hoje
+    const diasDesdeCriacao = Math.floor(
+      hojeDateTime.diff(dataInicialDateTime, 'days').days
+    );
+    if (diasDesdeCriacao > 0) {
+      const diasNoPrimeiroMes = dataInicialDateTime.daysInMonth;
+      const valorParaJuros = historicoAtualizado
+        .filter((evento) => new Date(evento.data) <= hoje)
+        .reduce((sum, evento) => sum + evento.valor, 0);
+      const proporcao = diasDesdeCriacao / diasNoPrimeiroMes;
+      const juros = valorParaJuros * (jurosAtual / 100) * proporcao;
+      if (juros > 0) {
+        historicoAtualizado.push({
+          data: hoje.toISOString().split('T')[0],
+          descricao: `Juros parcial do mês atual (${jurosAtual}% de ${formatarMoedaSemCores(
+            valorParaJuros
+          )} - ${diasDesdeCriacao} dias)`,
+          valor: juros,
+        });
+        valorAtual += juros;
+      }
+    }
+  } else if (dataJuros <= hoje) {
+    // Já passou pelo menos um mês completo: parcial do dia seguinte ao último juros até hoje
     if (proximoJuros && dataJuros >= new Date(proximoJuros.data)) {
       jurosAtual = proximoJuros.valor;
     }
 
-    // Calcula juros proporcional aos dias do período parcial
-    // O período parcial começa no dia seguinte ao último juros completo
-    // Normaliza as datas para o início do dia (meia-noite) para calcular apenas dias inteiros
     const dataJurosDateTime = DateTime.fromJSDate(dataJuros)
       .startOf('day')
       .plus({ days: 1 });
-    const hojeDateTime = DateTime.fromJSDate(hoje).startOf('day');
     const diasDecorridos = Math.floor(
       hojeDateTime.diff(dataJurosDateTime, 'days').days
     );
 
     if (diasDecorridos > 0) {
-      // Calcula quantos dias tem o mês de referência (mês do dataJuros)
       const diasNoMes = dataJurosDateTime.daysInMonth;
-
-      // Calcula o valor atual até hoje
       const valorParaJuros = historicoAtualizado
         .filter((evento) => new Date(evento.data) <= hoje)
         .reduce((sum, evento) => sum + evento.valor, 0);
-
-      // Calcula o juros proporcional
       const proporcao = diasDecorridos / diasNoMes;
       const juros = valorParaJuros * (jurosAtual / 100) * proporcao;
-
       if (juros > 0) {
         historicoAtualizado.push({
           data: hoje.toISOString().split('T')[0],
