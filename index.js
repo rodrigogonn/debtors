@@ -65,10 +65,36 @@ function validarData(data) {
   );
 }
 
+// Retorna a taxa de juros vigente em uma data
+function jurosNaData(historicoJurosOrdenado, data) {
+  let valor = historicoJurosOrdenado[0].valor;
+  for (const j of historicoJurosOrdenado) {
+    if (new Date(j.data) <= data) {
+      valor = j.valor;
+    } else {
+      break;
+    }
+  }
+  return valor;
+}
+
+// Gera as cobranças virtuais de cada parcela de uma dívida parcelada
+function gerarCobrancasParcelas(divida) {
+  const inicio = DateTime.fromISO(divida.parcelamento.inicioVencimentos);
+  const cobrancas = [];
+  for (let i = 0; i < divida.parcelamento.totalParcelas; i++) {
+    cobrancas.push({
+      data: inicio.plus({ months: i }).toISODate(),
+      descricao: `Parcela ${i + 1}/${divida.parcelamento.totalParcelas}`,
+      valor: divida.parcelamento.valorParcela,
+    });
+  }
+  return cobrancas;
+}
+
 // Atualiza o histórico de uma dívida com juros em tempo real
 function atualizarHistorico(divida) {
   const hoje = new Date();
-  let valorAtual = 0;
   const historicoAtualizado = [];
 
   // Ordena o histórico original por data
@@ -91,60 +117,33 @@ function atualizarHistorico(divida) {
     (a, b) => new Date(a.data) - new Date(b.data)
   );
 
-  // Pega a data inicial e o dia dos juros
   const dataInicial = new Date(divida.dataCriacao);
-  let dataJuros = new Date(dataInicial);
 
-  let mesesAdicionados = 0;
-  let jurosAtual = historicoJurosOrdenado[0].valor;
-  let proximoJuros = historicoJurosOrdenado[1];
-
-  // Processa o histórico em ordem cronológica
+  // Adiciona os eventos do histórico
   historicoOrdenado.forEach((evento) => {
-    // Verifica se precisa mudar o juros antes de adicionar o evento
-    if (proximoJuros && new Date(evento.data) >= new Date(proximoJuros.data)) {
-      jurosAtual = proximoJuros.valor;
-      proximoJuros =
-        historicoJurosOrdenado[
-          historicoJurosOrdenado.indexOf(proximoJuros) + 1
-        ];
-    }
-
-    // Adiciona o evento
     historicoAtualizado.push({
       data: evento.data,
       descricao: evento.descricao,
       valor: evento.valor,
     });
-    valorAtual += evento.valor;
   });
 
-  // Inicializa dataJuros para 1 mês depois da data inicial (primeiro juros)
-  dataJuros = DateTime.fromJSDate(dataInicial).plus({ months: 1 }).toJSDate();
-  mesesAdicionados = 1;
+  // Juros mensais completos até o último mês completo
+  let mesesAdicionados = 1;
+  let dataJuros = DateTime.fromJSDate(dataInicial)
+    .plus({ months: 1 })
+    .toJSDate();
 
-  // Adiciona juros mensais completos até o último mês completo
   while (dataJuros <= hoje) {
-    // Verifica se precisa mudar o juros
-    if (proximoJuros && dataJuros >= new Date(proximoJuros.data)) {
-      jurosAtual = proximoJuros.valor;
-      proximoJuros =
-        historicoJurosOrdenado[
-          historicoJurosOrdenado.indexOf(proximoJuros) + 1
-        ];
-    }
-
-    // Calcula a próxima data de juros
+    const jurosAtual = jurosNaData(historicoJurosOrdenado, dataJuros);
     const proximaDataJuros = DateTime.fromJSDate(dataInicial)
       .plus({ months: mesesAdicionados + 1 })
       .toJSDate();
 
-    // Calcula o valor atual até a data dos juros
     const valorParaJuros = historicoAtualizado
       .filter((evento) => new Date(evento.data) <= dataJuros)
       .reduce((sum, evento) => sum + evento.valor, 0);
 
-    // Juros mensal completo
     const juros = valorParaJuros * (jurosAtual / 100);
     if (juros > 0) {
       historicoAtualizado.push({
@@ -154,7 +153,6 @@ function atualizarHistorico(divida) {
         )})`,
         valor: juros,
       });
-      valorAtual += juros;
     }
 
     // Se a próxima data de juros já passou de hoje, para aqui
@@ -163,20 +161,19 @@ function atualizarHistorico(divida) {
       break;
     }
 
-    // Avança para o próximo mês
     dataJuros = DateTime.fromJSDate(dataInicial)
       .plus({ months: ++mesesAdicionados })
       .toJSDate();
   }
 
   // Período parcial: juros proporcional aos dias
-  // Caso 1: ainda no primeiro mês (não chegou na data do primeiro juros completo) → parcial desde a criação
+  // Caso 1: ainda no primeiro mês → parcial desde a criação até hoje
   // Caso 2: já passou pelo menos um mês completo → parcial do dia seguinte ao último juros até hoje
   const hojeDateTime = DateTime.fromJSDate(hoje).startOf('day');
   const dataInicialDateTime = DateTime.fromJSDate(dataInicial).startOf('day');
+  const jurosHoje = jurosNaData(historicoJurosOrdenado, hoje);
 
   if (dataJuros > hoje) {
-    // Ainda no primeiro mês: parcial desde a criação até hoje
     const diasDesdeCriacao = Math.floor(
       hojeDateTime.diff(dataInicialDateTime, 'days').days
     );
@@ -186,24 +183,18 @@ function atualizarHistorico(divida) {
         .filter((evento) => new Date(evento.data) <= hoje)
         .reduce((sum, evento) => sum + evento.valor, 0);
       const proporcao = diasDesdeCriacao / diasNoPrimeiroMes;
-      const juros = valorParaJuros * (jurosAtual / 100) * proporcao;
+      const juros = valorParaJuros * (jurosHoje / 100) * proporcao;
       if (juros > 0) {
         historicoAtualizado.push({
           data: hoje.toISOString().split('T')[0],
-          descricao: `Juros parcial do mês atual (${jurosAtual}% de ${formatarMoedaSemCores(
+          descricao: `Juros parcial do mês atual (${jurosHoje}% de ${formatarMoedaSemCores(
             valorParaJuros
           )} - ${diasDesdeCriacao} dias)`,
           valor: juros,
         });
-        valorAtual += juros;
       }
     }
-  } else if (dataJuros <= hoje) {
-    // Já passou pelo menos um mês completo: parcial do dia seguinte ao último juros até hoje
-    if (proximoJuros && dataJuros >= new Date(proximoJuros.data)) {
-      jurosAtual = proximoJuros.valor;
-    }
-
+  } else {
     const dataJurosDateTime = DateTime.fromJSDate(dataJuros)
       .startOf('day')
       .plus({ days: 1 });
@@ -217,21 +208,19 @@ function atualizarHistorico(divida) {
         .filter((evento) => new Date(evento.data) <= hoje)
         .reduce((sum, evento) => sum + evento.valor, 0);
       const proporcao = diasDecorridos / diasNoMes;
-      const juros = valorParaJuros * (jurosAtual / 100) * proporcao;
+      const juros = valorParaJuros * (jurosHoje / 100) * proporcao;
       if (juros > 0) {
         historicoAtualizado.push({
           data: hoje.toISOString().split('T')[0],
-          descricao: `Juros parcial do mês atual (${jurosAtual}% de ${formatarMoedaSemCores(
+          descricao: `Juros parcial do mês atual (${jurosHoje}% de ${formatarMoedaSemCores(
             valorParaJuros
           )} - ${diasDecorridos} dias)`,
           valor: juros,
         });
-        valorAtual += juros;
       }
     }
   }
 
-  // Ordena o histórico final por data
   return historicoAtualizado.sort(
     (a, b) => new Date(a.data) - new Date(b.data)
   );
@@ -660,20 +649,8 @@ async function registrarPagamento(dados) {
     (d) => d.id === dividaId
   );
 
-  // Calcula valor máximo que pode ser pago
-  let valorMaximo;
-  if (dividaSelecionada.parcelamento) {
-    const valorTotal =
-      dividaSelecionada.parcelamento.valorParcela *
-      dividaSelecionada.parcelamento.totalParcelas;
-    const pagamentosRealizados = dividaSelecionada.historico
-      .filter((h) => h.valor < 0)
-      .reduce((sum, h) => sum + Math.abs(h.valor), 0);
-    valorMaximo = valorTotal - pagamentosRealizados;
-  } else {
-    const { valorFinal } = calcularDividaAtualizada(dividaSelecionada);
-    valorMaximo = valorFinal;
-  }
+  const { valorFinal } = calcularDividaAtualizada(dividaSelecionada);
+  const valorMaximo = valorFinal;
 
   console.log(
     `\nValor máximo que pode ser pago: ${formatarMoeda(valorMaximo)}`
@@ -1023,30 +1000,47 @@ async function gerenciarHistorico(dados, divida) {
 
 function calcularDividaAtualizada(divida) {
   if (divida.parcelamento) {
-    const valorTotal =
-      divida.parcelamento.valorParcela * divida.parcelamento.totalParcelas;
-    const valorPago = divida.historico
-      .filter((h) => h.valor < 0)
-      .reduce((sum, h) => sum + Math.abs(h.valor), 0);
+    const temJuros =
+      divida.historicoJuros && divida.historicoJuros.some((j) => j.valor > 0);
 
-    const valorFinal = valorTotal - valorPago;
-    // Marca como quitada se o valor for negativo (pagamento a mais) ou muito próximo de zero (arredondamento)
+    if (!temJuros) {
+      const valorTotal =
+        divida.parcelamento.valorParcela * divida.parcelamento.totalParcelas;
+      const valorPago = divida.historico
+        .filter((h) => h.valor < 0)
+        .reduce((sum, h) => sum + Math.abs(h.valor), 0);
+
+      const valorFinal = valorTotal - valorPago;
+      divida.quitada = valorFinal < 0.01;
+
+      return {
+        historicoCompleto: divida.historico,
+        valorFinal,
+      };
+    }
+
+    // Com juros: injeta as parcelas como cobranças virtuais no histórico
+    // para que atualizarHistorico calcule os juros sobre o saldo correto.
+    const dividaComCobrancas = {
+      ...divida,
+      historico: [...gerarCobrancasParcelas(divida), ...divida.historico],
+    };
+    const historicoCompleto = atualizarHistorico(dividaComCobrancas);
+    const valorFinal = historicoCompleto.reduce(
+      (sum, evento) => sum + evento.valor,
+      0
+    );
     divida.quitada = valorFinal < 0.01;
 
-    return {
-      historicoCompleto: divida.historico,
-      valorFinal,
-    };
+    return { historicoCompleto, valorFinal };
   }
 
-  // Para dívidas não parceladas, mantém o cálculo original
   const historicoCompleto = atualizarHistorico(divida);
   const valorFinal = historicoCompleto.reduce(
     (sum, evento) => sum + evento.valor,
     0
   );
 
-  // Marca como quitada se o valor for negativo (pagamento a mais) ou muito próximo de zero (arredondamento)
   divida.quitada = valorFinal < 0.01;
 
   return {
